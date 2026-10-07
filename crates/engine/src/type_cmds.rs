@@ -598,8 +598,13 @@ pub fn specs() -> Vec<CommandSpec> {
                     }
                     if let Some(Value::Array(runs)) = p.get("runs") {
                         for r in runs {
-                            let a = byte_at(&t.text, r.get("start").and_then(Value::as_u64).unwrap_or(0) as usize);
-                            let b = byte_at(&t.text, r.get("end").and_then(Value::as_u64).map_or(usize::MAX, |x| x as usize));
+                            let (a0, b0) = (
+                                r.get("start").and_then(Value::as_u64).unwrap_or(0) as usize,
+                                r.get("end").and_then(Value::as_u64).map_or(usize::MAX, |x| x as usize),
+                            );
+                            // Normalise order like range_param/replace do: a reversed
+                            // run styles the swapped range instead of underflowing (#714).
+                            let (a, b) = (byte_at(&t.text, a0.min(b0)), byte_at(&t.text, a0.max(b0)));
                             style_range(t, a, b, &|st| {
                                 apply_char_props(st, r);
                             });
