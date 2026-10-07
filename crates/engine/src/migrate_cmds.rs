@@ -54,7 +54,9 @@ fn migrate(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let total = g + st + sh + pt + tp;
     if total > 0 {
-        ps.rev += 1;
+        // Issue #718: the library persists with the preferences document, so a
+        // migration must dirty the preferences like every other preset change.
+        s.presets_changed();
     }
     counts.insert("gradients".into(), json!(g));
     counts.insert("styles".into(), json!(st));
