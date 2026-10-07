@@ -386,7 +386,7 @@ pub fn refresh(doc: &Document, t: &mut TextLayer) {
     t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
 }
 
-fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&mut TextLayer, &Document) -> Result<R>) -> Result<R> {
+fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, rename: Option<String>, f: impl FnOnce(&mut TextLayer, &Document) -> Result<R>) -> Result<R> {
     let id = layer_id(s, p)?;
     let (r, damage) = s.edit(label, |doc, _| {
         let snapshot = doc.clone();
@@ -403,6 +403,11 @@ fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&m
         let damage = before.zip(t.cache.as_ref().map(|c| c.tile_bounds())).map(|(a, b)| a.union(&b));
         let name = auto_named.then(|| layer_name(&t.text));
         if let Some(n) = name {
+            l.name = n;
+        }
+        // An explicit `name` rides in the same history step as the text edits (#497),
+        // overriding the auto-name follow above.
+        if let Some(n) = rename {
             l.name = n;
         }
         Ok((r, damage))
@@ -559,7 +564,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     }
                 };
                 let label = if kern_pair.is_some() { "Kerning" } else { "Edit Type" };
-                with_text_layer(s, p, label, |t, doc| {
+                with_text_layer(s, p, label, name.clone(), |t, doc| {
                     if let Some((at, by)) = kern_pair {
                         // Photoshop's Alt+←/→: the pair before the caret becomes manually kerned,
                         // starting from what it shows now (its metrics/optical or manual value).
@@ -635,12 +640,6 @@ pub fn specs() -> Vec<CommandSpec> {
                     }
                     Ok(())
                 })?;
-                if let Some(n) = name {
-                    s.edit("Rename Layer", |doc, _| {
-                        doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?.name = n;
-                        Ok(())
-                    })?;
-                }
                 info(s, &json!({ "layer": id.0 }))
             },
         },
@@ -658,7 +657,7 @@ pub fn specs() -> Vec<CommandSpec> {
             run: |s, p| {
                 let id = layer_id(s, p)?;
                 check_kerning(p).map_err(|m| bad("type.setStyle", m))?;
-                with_text_layer(s, p, "Set Type Style", |t, _| {
+                with_text_layer(s, p, "Set Type Style", None, |t, _| {
                     let (a, b) = range_param(&t.text, p);
                     let mut probe = CharStyle::default();
                     if apply_char_props(&mut probe, p) {
