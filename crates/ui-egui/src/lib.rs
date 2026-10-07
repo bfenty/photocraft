@@ -96,6 +96,7 @@ pub mod preset_panels;
 pub mod props_layout;
 pub mod proxy;
 pub mod puppet_ui;
+pub mod quick_pick;
 pub mod rasterize_prompt;
 pub mod retouch_ui;
 mod rgb_histogram;
@@ -301,6 +302,8 @@ pub struct PhotocraftApp {
     last_stroke_end: Option<(DocId, [f64; 2])>,
     /// Control+Alt-drag brush resize in progress (`brush_resize`, #231).
     pub(crate) brush_resize: Option<brush_resize::Resize>,
+    /// A ⌘⌥⌃-click layer pick is in progress; its drag and release are swallowed (`quick_pick`).
+    pub(crate) quick_pick: bool,
     /// The next tool `Down` is an Alt+right-drag that resizes the brush (#297). `tool_event`
     /// takes it on every event, so a press another handler consumes can't leave it set.
     pub(crate) brush_resize_armed: bool,
@@ -437,6 +440,7 @@ impl PhotocraftApp {
             defer_live_stroke: false,
             last_stroke_end: None,
             brush_resize: None,
+            quick_pick: false,
             brush_resize_armed: false,
             alt_sampling: false,
             opacity_keys: None,
@@ -687,6 +691,7 @@ impl PhotocraftApp {
         if let Some(r) = preset_files_ui::open(self, name, bytes) {
             return r.map(|()| Vec::new());
         }
+        let name = &self.open_name(name);
         // Decoded on a worker: a tab with progress appears now, the document when it's ready
         // (warnings are shown then).
         if self.background_jobs {
@@ -736,7 +741,8 @@ impl PhotocraftApp {
     fn import_automation_document(&mut self, name: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
         let (doc, warnings) = import(name, bytes)?;
-        self.session.add_document(doc, Some(name.to_string()));
+        // The caller records the path it read from.
+        self.session.add_document(doc, None);
         self.sync_views();
         self.ui.status = format!("Opened {name}");
         self.ui.status_error = false;
