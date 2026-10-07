@@ -194,6 +194,11 @@ pub fn stack_image(file_name: &str, bytes: &[u8], fmt: PixelFormat, mode: photoc
             photocraft_compose::render_layer(&one, bounds).px
         })
         .collect();
+    if frames.is_empty() {
+        // Issue #717: with no visible layers there is nothing to combine; the
+        // empty frame list would reach write_region with a 0-length buffer.
+        return Err(other("the smart object's contents have no visible layers"));
+    }
     let stat = match mode {
         photocraft_doc::StackMode::Entropy => Stat::Entropy,
         photocraft_doc::StackMode::Kurtosis => Stat::Kurtosis,
