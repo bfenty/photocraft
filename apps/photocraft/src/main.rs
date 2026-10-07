@@ -73,9 +73,22 @@ fn parse_control_port(value: &str, source: &str) -> Result<u16, String> {
     value.trim().parse().map_err(|_| format!("{source}: `{value}` is not a valid port (expected a number from 0 to 65535)"))
 }
 
+/// Process exit status for the collected `--control` / `PHOTOCRAFT_CONTROL_PORT` errors: `None`
+/// when there are none, else 2 (a command-line usage error), never 0.
+fn control_args_exit_code(errors: &[String]) -> Option<i32> {
+    if errors.is_empty() { None } else { Some(2) }
+}
+
 #[cfg(test)]
 mod control_port_tests {
-    use super::parse_control_port;
+    use super::{control_args_exit_code, parse_control_port};
+
+    #[test]
+    fn control_port_errors_exit_non_zero() {
+        assert_eq!(control_args_exit_code(&[]), None);
+        let errors = vec![parse_control_port("nope", "--control").unwrap_err()];
+        assert_eq!(control_args_exit_code(&errors), Some(2));
+    }
 
     #[test]
     fn control_port_accepts_valid_numbers() {
@@ -138,11 +151,12 @@ fn main() -> eframe::Result {
 
     // A malformed control port must not silently drop the control server (issue #701): name the
     // bad value and fail the launch, like `photocraft-cli serve --port` does for the same typo.
-    if !control_arg_errors.is_empty() {
+    // Exit status 2 is the usual command-line usage error, so a launcher sees the failure.
+    if let Some(code) = control_args_exit_code(&control_arg_errors) {
         for error in &control_arg_errors {
             eprintln!("photocraft: {error}");
         }
-        return Ok(());
+        std::process::exit(code);
     }
 
     // winit and wgpu dlopen the windowing and GPU libraries, and some of those crates panic when
