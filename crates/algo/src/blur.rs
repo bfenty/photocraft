@@ -274,6 +274,18 @@ pub(crate) fn motion(src: &Image, out: Rect, ctx: &Ctx, angle: f32, distance: f3
     })
 }
 
+/// Spin blur sample count: ~1 sample per pixel of swept arc length.
+/// The old clamp to 64 left samples ~27px apart at the edge of a 1000px
+/// canvas, so the blur aliased into banding instead of averaging (#515).
+fn spin_samples(arc: f32, r: f32) -> i32 {
+    ((arc * r).ceil() as i32).max(1)
+}
+
+/// Zoom blur sample count: ~1 sample per pixel along the swept ray.
+fn ray_samples(span: f32, r: f32) -> i32 {
+    ((span * r).ceil() as i32).max(1)
+}
+
 pub(crate) fn radial(src: &Image, out: Rect, ctx: &Ctx, amount: f32, method: RadialMethod, center: (f32, f32)) -> Vec<f32> {
     let b = ctx.bounds;
     let (cx, cy) = (b.x0 as f32 + b.width() as f32 * center.0, b.y0 as f32 + b.height() as f32 * center.1);
@@ -285,7 +297,7 @@ pub(crate) fn radial(src: &Image, out: Rect, ctx: &Ctx, amount: f32, method: Rad
             RadialMethod::Spin => {
                 // Arc of `amount` degrees centred on the pixel.
                 let arc = amount.to_radians();
-                let n = ((arc * r).ceil() as i32).clamp(1, 64);
+                let n = spin_samples(arc, r);
                 for i in 0..=n {
                     let t = (i as f32 / n as f32 - 0.5) * arc;
                     let (s, c) = t.sin_cos();
@@ -295,7 +307,7 @@ pub(crate) fn radial(src: &Image, out: Rect, ctx: &Ctx, amount: f32, method: Rad
             RadialMethod::Zoom => {
                 // Samples along the ray, up to amount/2 % closer to the centre.
                 let span = amount / 200.0;
-                let n = ((span * r).ceil() as i32).clamp(1, 64);
+                let n = ray_samples(span, r);
                 for i in 0..=n {
                     let k = 1.0 - span * i as f32 / n as f32;
                     pts.push((cx + dx * k, cy + dy * k));
@@ -360,5 +372,17 @@ mod tests {
         let err = exact.iter().zip(&fast).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
         assert!(err < 0.02, "max error {err}");
         assert_eq!(boxes_for_gauss(10.0, 3).len(), 3);
+    }
+
+    /// Sample-count density rule (#515): arc length, not a 64 cap.
+    #[test]
+    fn radial_sample_counts_follow_arc_length() {
+        // r=450, 100-degree arc -> ~786 samples (old clamp: 64).
+        assert_eq!(spin_samples(100.0f32.to_radians(), 450.0), 786);
+        // Zoom: span=0.5 (amount 100), r=450 -> 225 samples (old clamp: 64).
+        assert_eq!(ray_samples(0.5, 450.0), 225);
+        // At the centre there is nothing to sweep: still one sample (identity).
+        assert_eq!(spin_samples(60.0f32.to_radians(), 0.0), 1);
+        assert_eq!(ray_samples(0.5, 0.0), 1);
     }
 }
