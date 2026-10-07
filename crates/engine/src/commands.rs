@@ -827,7 +827,11 @@ fn build() -> Vec<CommandSpec> {
                 let x = int(p, "x").unwrap_or(0) as i32;
                 let y = int(p, "y").unwrap_or(0) as i32;
                 let d = s.active().ok_or(EngineError::NoDocument)?;
-                let px = photocraft_compose::render(&d.doc, Rect::from_xywh(x, y, 1, 1)).px[0];
+                // Out-of-canvas coordinates make Rect::from_xywh saturate to an
+                // empty rect and render() return an empty buffer; the composite
+                // outside the canvas is transparent (#702).
+                let outside = x < 0 || y < 0 || x as u64 >= d.doc.size.width as u64 || y as u64 >= d.doc.size.height as u64;
+                let px = if outside { [0.0; 4] } else { photocraft_compose::render(&d.doc, Rect::from_xywh(x, y, 1, 1)).px[0] };
                 Ok(json!(px))
             },
             journal: false,
