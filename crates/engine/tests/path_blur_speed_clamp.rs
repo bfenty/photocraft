@@ -33,7 +33,5 @@ fn path_blur_normal_entry_speed_still_blurs() {
     // Control: a documented in-range speed keeps working.
     let mut s = Session::new();
     s.execute("file.new", json!({"width": 16, "height": 16, "background": "#808080"})).unwrap();
-    let before = serde_json::from_value::<Vec<f32>>(s.execute("document.pixel", json!({"x": 8, "y": 8})).unwrap()).unwrap();
     s.execute("filter.blurGallery.pathBlur", json!({"paths": [{"points": [[0.2, 0.5], [0.8, 0.5]], "speed": 120.0}]})).expect("in-range speed must succeed");
-    let _ = before;
 }
