@@ -161,6 +161,24 @@ pub fn parse_cube(text: &str) -> Result<LutFile, LutError> {
         if rows.len() != expected_rows {
             return err("no LUT_3D_SIZE in .cube file");
         }
+        // #8913: the resample below bakes the curve onto a fixed 33-point grid, so a domain
+        // narrower than two grid cells cannot hold the curve's transition — the baked table
+        // silently shifts colours (measured 42 RGB8 levels for a two-node ramp over
+        // 0.24..0.26, where Photoshop renders the ramp exactly). Refuse such tables rather
+        // than render wrong colours, mirroring how custom-domain 3D tables are refused
+        // upstream. Wider domains keep the resample: their off-grid error stays sub-perceptual.
+        const MIN_DOMAIN_WIDTH: f32 = 2.0 / 33.0;
+        for ch in 0..3 {
+            if dmax[ch] - dmin[ch] < MIN_DOMAIN_WIDTH {
+                return err(format!(
+                    "1D LUT domain on {} is {min}..{max}: narrower than the 33-point resample grid can represent \
+                     ({MIN_DOMAIN_WIDTH:.4}); widen DOMAIN_MIN/DOMAIN_MAX or export the look as a 3D LUT",
+                    ["red", "green", "blue"][ch],
+                    min = dmin[ch],
+                    max = dmax[ch],
+                ));
+            }
+        }
         // The 1D table is resampled onto a 0..1 cube anyway, so its input domain
         // (`DOMAIN_MIN`/`MAX`, `LUT_1D_INPUT_RANGE`) is baked into the resample: an input `v`
         // reads the table at `(v - min) / (max - min)`, saturating outside.
@@ -380,6 +398,30 @@ DOMAIN_MAX 0.5 1 1
         ))
         .unwrap_err();
         assert!(e.0.contains("below DOMAIN_MAX"), "{e}");
+    }
+
+    #[test]
+    fn cube_1d_narrow_domain_is_refused() {
+        // #8913: the issue's fixture — a two-node ramp over 0.24..0.26. Baking it onto the
+        // 33-point grid rendered grey-65 as 148 where Photoshop renders 190 (42-level error).
+        // It must now be an actionable parse error rather than a silently wrong table.
+        let e = parse_cube("LUT_1D_SIZE 2\nDOMAIN_MIN 0.24 0.24 0.24\nDOMAIN_MAX 0.26 0.26 0.26\n0 0 0\n1 1 1\n").unwrap_err();
+        assert!(e.0.contains("narrower than the 33-point resample grid"), "{e}");
+        // The same domain via LUT_1D_INPUT_RANGE is refused identically.
+        let e = parse_cube("LUT_1D_SIZE 2\nLUT_1D_INPUT_RANGE 0.24 0.26\n0 0 0\n1 1 1\n").unwrap_err();
+        assert!(e.0.contains("narrower"), "{e}");
+        // A per-channel narrow domain names the offending channel.
+        let e = parse_cube("LUT_1D_SIZE 2\nDOMAIN_MIN 0 0 0.24\nDOMAIN_MAX 1 1 0.26\n0 0 0\n1 1 1\n").unwrap_err();
+        assert!(e.0.contains("blue"), "{e}");
+    }
+
+    #[test]
+    fn cube_1d_wide_domain_still_bakes() {
+        // The refusal threshold is two grid cells (2/33 ≈ 0.0606): a domain comfortably
+        // above it still parses, and the default 0..1 domain is untouched.
+        let table = "LUT_1D_SIZE 2\nLUT_1D_INPUT_RANGE 0.1 0.17\n0 0 0\n1 1 1\n";
+        parse_cube(table).expect("wider-than-grid domain still bakes");
+        parse_cube("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n").expect("default domain");
     }
 
     #[test]
